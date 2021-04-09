@@ -8,3 +8,5 @@ build/
 /libs/
 /bot.conf
 /group.yml
+/resources/private.key
+/public.key
