@@ -5,9 +5,11 @@ import io.ktor.features.*
 import io.ktor.http.cio.websocket.*
 import io.ktor.websocket.*
 import io.nekohasekai.ktlib.core.mkLog
+import io.nekohasekai.nmd.Nmd
+import io.nekohasekai.nmd.database.Sessions
 import io.nekohasekai.nmd.utils.EncUtil
 import io.nekohasekai.tmicro.tmnet.SerializedData
-import io.nekohasekai.tmicro.tmnet.TMApi
+import io.nekohasekai.tmicro.tmnet.TMApi.*
 import io.nekohasekai.tmicro.tmnet.TMClassStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -15,11 +17,13 @@ import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.ECPublicKeyParameters
+import org.bouncycastle.util.encoders.Base64
+import org.jetbrains.exposed.sql.select
 
 class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServerSession) {
 
     val chaChaSession = EncUtil.ChaChaSession(key)
-    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}")
+    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}#${Base64.toBase64String(key).hashCode()}")
 
     companion object {
         val connections = HashMap<ByteArray, ConnectionsManager>()
@@ -85,36 +89,40 @@ class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServer
     }
 
     var status = Status.START
+    private lateinit var account: ByteArray
     private lateinit var tempData: ByteArray
 
-    private suspend fun processRequest(request: TMApi.Object) {
+    private suspend fun processRequest(request: Object) {
 
         var requestId = -1
         var function = request
-        if (request is TMApi.RpcRequest) {
+        if (request is RpcRequest) {
             requestId = request.requestId
             function = request.request
         }
 
+        log.debug("Server received ${function.javaClass.simpleName}")
+
         if (status == Status.DENY) {
-            sendError(requestId, 400, "Bad session.")
+            sendError(requestId, 403, "Bad session.")
             return
         }
 
         when (function) {
-            is TMApi.InitConnection -> {
+            is InitConnection -> {
                 if (status != Status.START) {
                     sendError(requestId, 400, "Connection started.")
                     return
                 }
-                if (function.layer > TMApi.LAYER) {
-                    sendError(requestId, 501, "Max layer of this server is ${TMApi.LAYER}.")
+                if (function.layer > LAYER) {
+                    sendError(requestId, 501, "Max layer of this server is $LAYER.")
                     return
                 }
                 if (function.session.size != 33) {
                     sendError(requestId, 400, "Bad session.")
                     return
                 }
+                account = function.session
                 val pubKey = try {
                     ECPublicKeyParameters(EncUtil.sm2Params.curve.decodePoint(function.session), EncUtil.sm2Params)
                 } catch (e: Exception) {
@@ -125,12 +133,12 @@ class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServer
                 tempData = ByteArray(32)
                 EncUtil.secureRandom.nextBytes(tempData)
                 val data = EncUtil.processSM2(pubKey, true, tempData)
-                val response = TMApi.ConnInitTemp()
+                val response = ConnInitTemp()
                 response.data = data
                 status = Status.WAIT_VERIFY
                 sendResponse(requestId, response)
             }
-            is TMApi.VerifyConnection -> {
+            is VerifyConnection -> {
                 if (status == Status.START) {
                     sendError(requestId, 400, "Connection not started.")
                     return
@@ -140,24 +148,48 @@ class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServer
                 }
                 if (!tempData.contentEquals(function.data)) {
                     status = Status.DENY
-                    sendError(requestId, 400, "Bad data.")
+                    sendError(requestId, 403, "Bad data.")
                     return
                 }
                 status = Status.VERIFIED
-                val response = TMApi.Ok()
                 sendOk(requestId)
+            }
+            else -> if (status != Status.VERIFIED) {
+                sendError(requestId, 401, "Unauthorized.")
+                return
+            }
+        }
+
+        when (function) {
+            is GetInfo -> {
+                val account = Nmd.database {
+                    Sessions.select { Sessions.key eq account }
+                        .firstOrNull()
+                }
+                sendResponse(requestId, ClientInfo().apply {
+                    if (account == null) {
+                        accountStatus = STATUS_WAIT_PHONE
+                    } else {
+                        accountStatus = account[Sessions.status]
+                        if (accountStatus == STATUS_AUTHED) {
+                            loginUser = account[Sessions.userId]
+                        }
+                    }
+                })
             }
         }
 
     }
 
-    private suspend fun sendResponse(requestId: Int, result: TMApi.Object) {
+    private suspend fun sendResponse(requestId: Int, result: Object) {
         if (requestId == -1) {
             // no response
             return
         }
 
-        val response = TMApi.RpcResponse()
+        log.debug("Server send ${result.javaClass.simpleName}")
+
+        val response = RpcResponse()
         response.requestId = requestId
         response.response = result
 
@@ -167,11 +199,11 @@ class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServer
     }
 
     private suspend fun sendOk(requestId: Int) {
-        sendResponse(requestId, TMApi.Ok())
+        sendResponse(requestId, Ok())
     }
 
     private suspend fun sendError(requestId: Int, code: Int, message: String) {
-        val error = TMApi.Error()
+        val error = Error()
         error.code = code
         error.message = message
 

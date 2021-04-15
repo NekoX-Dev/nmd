@@ -38,6 +38,12 @@ public class TMClassStore {
             case TMApi.TM_INIT_VERIFY:
                 response = new VerifyConnection();
                 break;
+            case TMApi.TM_CLIENT_INFO:
+                response = new ClientInfo();
+                break;
+            case TMApi.TM_GET_INFO:
+                response = new GetInfo();
+                break;
             default:
                 throw new IllegalStateException("Unknown constructor" + constructor);
         }

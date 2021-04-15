@@ -13,7 +13,6 @@ import org.bouncycastle.crypto.params.*
 import org.bouncycastle.crypto.prng.DigestRandomGenerator
 import org.bouncycastle.crypto.prng.RandomGenerator
 import org.bouncycastle.util.Arrays
-import org.bouncycastle.util.encoders.Base64
 import java.math.BigInteger
 import java.security.SecureRandom
 import java.util.*
@@ -40,9 +39,9 @@ object EncUtil {
         privKey = ECPrivateKeyParameters(BigInteger(ResourceUtil.readBytes("private.key")), sm2Params)
     }
 
-    fun publicDecode(content: String): ByteArray {
+    fun publicDecode(content: ByteArray): ByteArray {
         loadPrivKey()
-        return processSM2(privKey, false, Base64.decode(content))
+        return processSM2(privKey, false, content)
     }
 
     class MicroRandom(

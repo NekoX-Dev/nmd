@@ -13,6 +13,8 @@ public class TMApi {
     public static final int TM_INIT_CONNECTION = CONSTRUCTOR + 4;
     public static final int TM_INIT_TEMP = CONSTRUCTOR + 5;
     public static final int TM_INIT_VERIFY = CONSTRUCTOR + 6;
+    public static final int TM_CLIENT_INFO = CONSTRUCTOR + 7;
+    public static final int TM_GET_INFO = CONSTRUCTOR + 8;
 
     public static final int LAYER = 0;
 
@@ -61,14 +63,6 @@ public class TMApi {
 
         public int code;
         public String message;
-
-        public Error() {
-        }
-
-        public Error(int code, String message) {
-            this.code = code;
-            this.message = message;
-        }
 
         public int getConstructor() {
             return TM_ERROR;
@@ -215,5 +209,49 @@ public class TMApi {
         }
 
     }
+
+    public static final int STATUS_WAIT_PHONE = 0;
+    public static final int STATUS_WAIT_CODE = 1;
+    public static final int STATUS_WAIT_PSWD = 2;
+    public static final int STATUS_AUTHED = 3;
+
+    public static class ClientInfo extends Object {
+
+        public int accountStatus;
+        public int loginUser;
+
+        public int getConstructor() {
+            return TM_CLIENT_INFO;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            accountStatus = stream.readInt32(exception);
+            if (accountStatus == STATUS_AUTHED) {
+                loginUser = stream.readInt32(exception);
+            }
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            stream.writeInt32(accountStatus);
+            if (accountStatus == STATUS_AUTHED) {
+                stream.writeInt32(loginUser);
+            }
+        }
+    }
+
+    public static class GetInfo extends Function {
+
+        public int getConstructor() {
+            return TM_GET_INFO;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+        }
+
+    }
+
 
 }

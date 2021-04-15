@@ -9,30 +9,36 @@ import io.ktor.request.*
 import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.server.netty.*
-import io.ktor.utils.io.core.*
 import io.ktor.websocket.*
 import io.nekohasekai.ktlib.core.LOG_LEVEL
 import io.nekohasekai.ktlib.td.cli.TdCli
+import io.nekohasekai.ktlib.td.core.TdLoader
 import io.nekohasekai.nmd.net.ConnectionsManager
 import io.nekohasekai.nmd.utils.EncUtil
+import io.nekohasekai.tmicro.tmnet.SerializedData
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.DEBUG_PROPERTY_VALUE_ON
+import org.bouncycastle.util.encoders.Base64
+import java.io.File
 import java.time.Duration
+import kotlin.math.abs
 
 object Nmd : TdCli() {
 
     @JvmStatic
     fun main(args: Array<String>) {
+        TdLoader.tryLoad(File("cache"), true)
         EngineMain.main(args)
     }
 
     @JvmStatic
+    @Suppress("unused")
     fun Application.nmd() {
 
         System.setProperty(DEBUG_PROPERTY_NAME, DEBUG_PROPERTY_VALUE_ON)
-
         launch(emptyArray())
         loadConfig()
+        initDatabase("nmd.db")
         LOG_LEVEL = Level.TRACE
 
         install(ForwardedHeaderSupport)
@@ -52,14 +58,22 @@ object Nmd : TdCli() {
             webSocket("/") {
                 val authorization = call.request.authorization()
                 if (authorization == null) {
-                    call.respond(HttpStatusCode.BadRequest, byteArrayOf())
+                    call.respond(HttpStatusCode.BadRequest, "Bad request")
                     return@webSocket
                 }
 
-                println(authorization)
-
-                val key = EncUtil.publicDecode(authorization.substringAfter(" "))
-                ConnectionsManager(key, this).loopEvents()
+                try {
+                    val data = SerializedData(EncUtil.publicDecode(Base64.decode(authorization.substringAfter(" "))))
+                    val key = data.readByteArray(true)
+                    val connection = ConnectionsManager(key, this)
+                    if (abs((System.currentTimeMillis() / 1000) - data.readInt32(true)) > 10) {
+                        error("Invalid timeMs")
+                    }
+                    connection.loopEvents()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    call.respond(HttpStatusCode.BadRequest, "Bad request")
+                }
             }
         }
 
