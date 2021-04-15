@@ -105,7 +105,7 @@ object EncUtil {
             return if (output xor isServer) {
                 Arrays.concatenate(key, BigInteger.valueOf(time.toLong()).toByteArray(), byteArrayOf(0))
             } else {
-                Arrays.concatenate(key, BigInteger.valueOf(time.toLong()).toByteArray(), byteArrayOf(0))
+                Arrays.concatenate(key, BigInteger.valueOf(time.toLong()).toByteArray(), byteArrayOf(1))
             }
         }
 

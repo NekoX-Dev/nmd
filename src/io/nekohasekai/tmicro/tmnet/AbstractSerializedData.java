@@ -24,6 +24,8 @@ public abstract class AbstractSerializedData {
 
     public abstract void writeDouble(double d);
 
+    public abstract byte readByte(boolean exception);
+
     public abstract int readInt32(boolean exception);
 
     public abstract boolean readBool(boolean exception);

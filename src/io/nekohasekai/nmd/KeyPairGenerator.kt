@@ -1,4 +1,4 @@
-package io.nekohasekai.nmd.main
+package io.nekohasekai.nmd
 
 import io.nekohasekai.nmd.utils.EncUtil
 import org.bouncycastle.crypto.generators.ECKeyPairGenerator

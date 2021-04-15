@@ -11,9 +11,10 @@ import io.ktor.routing.*
 import io.ktor.server.netty.*
 import io.ktor.websocket.*
 import io.nekohasekai.ktlib.core.LOG_LEVEL
+import io.nekohasekai.ktlib.db.forceCreateTables
 import io.nekohasekai.ktlib.td.cli.TdCli
 import io.nekohasekai.ktlib.td.core.TdLoader
-import io.nekohasekai.nmd.net.ConnectionsManager
+import io.nekohasekai.nmd.database.Sessions
 import io.nekohasekai.nmd.utils.EncUtil
 import io.nekohasekai.tmicro.tmnet.SerializedData
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
@@ -49,6 +50,11 @@ object Nmd : TdCli() {
         launch(emptyArray())
         loadConfig()
         initDatabase("nmd.db")
+
+        database.write {
+            forceCreateTables(Sessions)
+        }
+
         LOG_LEVEL = Level.TRACE
 
         install(ForwardedHeaderSupport)

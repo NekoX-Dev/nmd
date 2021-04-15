@@ -1,55 +1,12 @@
 package io.nekohasekai.tmicro.tmnet;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-
 public class TMApi {
 
-    private static final int CONSTRUCTOR = Integer.MIN_VALUE;
-    public static final int TM_OK = CONSTRUCTOR;
-    public static final int TM_ERROR = CONSTRUCTOR + 1;
-    public static final int TM_RPC_REQUEST = CONSTRUCTOR + 2;
-    public static final int TM_RPC_RESPONSE = CONSTRUCTOR + 3;
-    public static final int TM_INIT_CONNECTION = CONSTRUCTOR + 4;
-    public static final int TM_INIT_TEMP = CONSTRUCTOR + 5;
-    public static final int TM_INIT_VERIFY = CONSTRUCTOR + 6;
-    public static final int TM_CLIENT_INFO = CONSTRUCTOR + 7;
-    public static final int TM_GET_INFO = CONSTRUCTOR + 8;
-
-    public static final int LAYER = 0;
+    public static int LAYER = 0;
 
     public static abstract class Object {
 
         public abstract int getConstructor();
-
-        public abstract void readParams(AbstractSerializedData stream, boolean exception);
-
-        public abstract void serializeToStream(AbstractSerializedData stream);
-
-        public int getObjectSize() {
-            SerializedData byteBuffer = new SerializedData(true);
-            serializeToStream(byteBuffer);
-            return byteBuffer.length();
-        }
-
-        public static Gson gson;
-
-        @Override
-        public String toString() {
-            if (gson == null) {
-                gson = new GsonBuilder()
-                        .setPrettyPrinting()
-                        .create();
-            }
-            return getClass().getSimpleName() + " " + gson.toJson(this);
-        }
-    }
-
-    public static class Ok extends Object {
-
-        public int getConstructor() {
-            return TM_OK;
-        }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
         }
@@ -57,6 +14,19 @@ public class TMApi {
         public void serializeToStream(AbstractSerializedData stream) {
         }
 
+        public int getObjectSize() {
+            SerializedData byteBuffer = new SerializedData(true);
+            serializeToStream(byteBuffer);
+            return byteBuffer.length();
+        }
+    }
+
+
+    public static class Ok extends Object {
+
+        public int getConstructor() {
+            return 0x1;
+        }
     }
 
     public static class Error extends Object {
@@ -64,8 +34,16 @@ public class TMApi {
         public int code;
         public String message;
 
+        public Error() {
+        }
+
+        public Error(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
         public int getConstructor() {
-            return TM_ERROR;
+            return 0x2;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
@@ -81,45 +59,36 @@ public class TMApi {
     }
 
     public static abstract class Function extends Object {
-    }
-
-    public static class RpcRequest extends Function {
 
         public int requestId;
-        public Function request;
 
-        public int getConstructor() {
-            return TM_RPC_REQUEST;
-        }
-
-        public void readParams(AbstractSerializedData stream, boolean exception) {
-            requestId = stream.readInt32(exception);
-            request = (Function) TMClassStore.deserializeFromSteam(stream, exception);
-        }
-
-        public void serializeToStream(AbstractSerializedData stream) {
-            stream.writeInt32(requestId);
-            TMClassStore.serializeToStream(stream, request);
-        }
     }
 
-    public static class RpcResponse extends Object {
+    public static class Response extends Object {
 
         public int requestId;
         public Object response;
 
+        public Response() {
+        }
+
+        public Response(int requestId, Object response) {
+            this.requestId = requestId;
+            this.response = response;
+        }
+
         public int getConstructor() {
-            return TM_RPC_RESPONSE;
+            return 0x3;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
             requestId = stream.readInt32(exception);
-            response = TMClassStore.deserializeFromSteam(stream, exception);
+            response = TMStore.deserializeFromSteam(stream, exception);
         }
 
         public void serializeToStream(AbstractSerializedData stream) {
             stream.writeInt32(requestId);
-            TMClassStore.serializeToStream(stream, response);
+            TMStore.serializeToStream(stream, response);
         }
 
     }
@@ -127,59 +96,56 @@ public class TMApi {
     public static class InitConnection extends Function {
 
         public int layer;
-        public int appVersion;
         public String platform;
         public String systemVersion;
+        public int appVersion;
         public byte[] session;
-        public Object query;
 
         public InitConnection() {
         }
 
-        public InitConnection(int layer, int appVersion, String platform, String systemVersion, Object query) {
+        public InitConnection(int layer, int appVersion, String platform, String systemVersion) {
             this.layer = layer;
             this.appVersion = appVersion;
             this.platform = platform;
             this.systemVersion = systemVersion;
-            this.query = query;
         }
 
         public int getConstructor() {
-            return TM_INIT_CONNECTION;
+            return 0x4;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
-            layer = stream.readInt32(exception);
-            appVersion = stream.readInt32(exception);
+            layer = stream.readByte(exception);
+            appVersion = stream.readByte(exception);
             platform = stream.readString(exception);
             systemVersion = stream.readString(exception);
             session = stream.readByteArray(exception);
-            int queryConstructor = stream.readInt32(exception);
-            if (queryConstructor != Integer.MAX_VALUE) {
-                query = TMClassStore.deserializeFromSteam(stream, exception);
-            }
         }
 
         public void serializeToStream(AbstractSerializedData stream) {
-            stream.writeInt32(layer);
-            stream.writeInt32(appVersion);
+            stream.writeByte(layer);
+            stream.writeByte(appVersion);
             stream.writeString(platform);
             stream.writeString(systemVersion);
             stream.writeByteArray(session);
-            if (query != null) {
-                TMClassStore.serializeToStream(stream, query);
-            } else {
-                stream.writeInt32(Integer.MAX_VALUE);
-            }
         }
+
     }
 
     public static class ConnInitTemp extends Object {
 
         public byte[] data;
 
+        public ConnInitTemp() {
+        }
+
+        public ConnInitTemp(byte[] data) {
+            this.data = data;
+        }
+
         public int getConstructor() {
-            return TM_INIT_TEMP;
+            return 0x5;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
@@ -196,12 +162,20 @@ public class TMApi {
 
         public byte[] data;
 
+        public VerifyConnection() {
+        }
+
+        public VerifyConnection(byte[] data) {
+            this.data = data;
+        }
+
         public int getConstructor() {
-            return TM_INIT_VERIFY;
+            return 0x6;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
             data = stream.readByteArray(exception);
+
         }
 
         public void serializeToStream(AbstractSerializedData stream) {
@@ -210,48 +184,302 @@ public class TMApi {
 
     }
 
-    public static final int STATUS_WAIT_PHONE = 0;
-    public static final int STATUS_WAIT_CODE = 1;
-    public static final int STATUS_WAIT_PSWD = 2;
-    public static final int STATUS_AUTHED = 3;
-
-    public static class ClientInfo extends Object {
-
-        public int accountStatus;
-        public int loginUser;
-
-        public int getConstructor() {
-            return TM_CLIENT_INFO;
-        }
-
-        public void readParams(AbstractSerializedData stream, boolean exception) {
-            accountStatus = stream.readInt32(exception);
-            if (accountStatus == STATUS_AUTHED) {
-                loginUser = stream.readInt32(exception);
-            }
-        }
-
-        public void serializeToStream(AbstractSerializedData stream) {
-            stream.writeInt32(accountStatus);
-            if (accountStatus == STATUS_AUTHED) {
-                stream.writeInt32(loginUser);
-            }
-        }
+    public static abstract class AuthenticationCodeType extends Object {
     }
 
-    public static class GetInfo extends Function {
+    public static class AuthenticationCodeTypeTelegramMessage extends AuthenticationCodeType {
+
+        public int length;
+
+        public AuthenticationCodeTypeTelegramMessage() {
+        }
+
+        public AuthenticationCodeTypeTelegramMessage(int length) {
+            this.length = length;
+        }
 
         public int getConstructor() {
-            return TM_GET_INFO;
+            return 0x7;
         }
 
         public void readParams(AbstractSerializedData stream, boolean exception) {
+            length = stream.readByte(exception);
         }
 
         public void serializeToStream(AbstractSerializedData stream) {
+            stream.writeByte(length);
         }
 
     }
 
+
+    public static class AuthenticationCodeTypeSms extends AuthenticationCodeType {
+
+        public int length;
+
+        public AuthenticationCodeTypeSms() {
+        }
+
+        public AuthenticationCodeTypeSms(int length) {
+            this.length = length;
+
+        }
+
+        public int getConstructor() {
+            return 0x8;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            length = stream.readByte(exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            stream.writeByte(length);
+        }
+
+    }
+
+
+    public static class AuthenticationCodeTypeCall extends AuthenticationCodeType {
+
+        public int length;
+
+        public AuthenticationCodeTypeCall() {
+        }
+
+        public AuthenticationCodeTypeCall(int length) {
+
+            this.length = length;
+
+        }
+
+        public int getConstructor() {
+            return 0x9;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            length = stream.readByte(exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            stream.writeByte(length);
+        }
+
+    }
+
+    public static class AuthenticationCodeInfo extends Object {
+
+        public String phoneNumber;
+        public AuthenticationCodeType type;
+        public AuthenticationCodeType nextType;
+        public int timeout;
+
+        public AuthenticationCodeInfo() {
+        }
+
+        public AuthenticationCodeInfo(String phoneNumber, AuthenticationCodeType type, AuthenticationCodeType nextType, int timeout) {
+
+            this.phoneNumber = phoneNumber;
+            this.type = type;
+            this.nextType = nextType;
+            this.timeout = timeout;
+
+        }
+
+        public int getConstructor() {
+            return 0xa;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            int flag = stream.readByte(exception);
+            phoneNumber = stream.readString(exception);
+            type = (AuthenticationCodeType) TMStore.deserializeFromSteam(stream, exception);
+            if ((flag & 1 << 1) == 1 << 1) {
+                nextType = (AuthenticationCodeType) TMStore.deserializeFromSteam(stream, exception);
+            }
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            int flag = 0;
+            if (nextType != null) {
+                flag |= 1 << 1;
+            }
+            stream.writeByte(flag);
+            stream.writeString(phoneNumber);
+            TMStore.serializeToStream(stream, type);
+            if (nextType != null) {
+                TMStore.serializeToStream(stream, nextType);
+            }
+            stream.writeInt32(timeout);
+        }
+
+    }
+
+    public static class EmailAddressAuthenticationCodeInfo extends Object {
+
+        public String emailAddressPattern;
+        public int length;
+
+        public EmailAddressAuthenticationCodeInfo() {
+        }
+
+        public EmailAddressAuthenticationCodeInfo(String emailAddressPattern, int length) {
+
+            this.emailAddressPattern = emailAddressPattern;
+            this.length = length;
+
+        }
+
+        public int getConstructor() {
+            return 0xb;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            emailAddressPattern = stream.readString(exception);
+            length = stream.readInt32(exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            stream.writeString(emailAddressPattern);
+            stream.writeInt32(length);
+        }
+
+    }
+
+    public static abstract class AuthorizationState extends Object {
+    }
+
+
+    public static class AuthorizationStateWaitPhoneNumber extends AuthorizationState {
+
+        public int getConstructor() {
+            return 0xc;
+        }
+
+    }
+
+
+    public static class AuthorizationStateWaitCode extends AuthorizationState {
+
+        public AuthenticationCodeInfo codeInfo;
+
+        public AuthorizationStateWaitCode() {
+        }
+
+        public AuthorizationStateWaitCode(AuthenticationCodeInfo codeInfo) {
+            this.codeInfo = codeInfo;
+        }
+
+        public int getConstructor() {
+            return 0xd;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            codeInfo = new AuthenticationCodeInfo();
+            codeInfo.readParams(stream, exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            codeInfo.serializeToStream(stream);
+        }
+
+    }
+
+    public static class AuthorizationStateWaitRegistration extends AuthorizationState {
+
+        public int getConstructor() {
+            return 0xe;
+        }
+
+    }
+
+    public static class AuthorizationStateWaitPassword extends AuthorizationState {
+
+        public String passwordHint;
+        public boolean hasRecoveryEmailAddress;
+        public String recoveryEmailAddressPattern;
+
+        public AuthorizationStateWaitPassword() {
+        }
+
+        public AuthorizationStateWaitPassword(String passwordHint, boolean hasRecoveryEmailAddress, String recoveryEmailAddressPattern) {
+            this.passwordHint = passwordHint;
+            this.hasRecoveryEmailAddress = hasRecoveryEmailAddress;
+            this.recoveryEmailAddressPattern = recoveryEmailAddressPattern;
+        }
+
+        public int getConstructor() {
+            return 0xf;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            int flags = stream.readByte(exception);
+            if ((flags & 1 << 1) == 1 << 1) {
+                passwordHint = stream.readString(exception);
+            }
+            hasRecoveryEmailAddress = (flags & 1 << 2) == 1 << 2;
+            recoveryEmailAddressPattern = stream.readString(exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            int flags = 0;
+            if (passwordHint != null) {
+                flags |= 1 << 1;
+            }
+            if (hasRecoveryEmailAddress) {
+                flags |= 1 << 2;
+            }
+            stream.writeByte(flags);
+            if (passwordHint != null) {
+                stream.writeString(passwordHint);
+            }
+            stream.writeString(recoveryEmailAddressPattern);
+        }
+
+    }
+
+    public static class AuthorizationStateReady extends AuthorizationState {
+
+        public int getConstructor() {
+            return 0x10;
+        }
+
+    }
+
+    public static class AuthorizationStateLoggingOut extends AuthorizationState {
+
+        public int getConstructor() {
+            return 0x11;
+        }
+
+    }
+
+    public static abstract class Update extends Object {
+    }
+
+    public static class UpdateAuthorizationState extends Update {
+
+        public AuthorizationState state;
+
+        public UpdateAuthorizationState() {
+        }
+
+        public UpdateAuthorizationState(AuthorizationState state) {
+            this.state = state;
+        }
+
+        public int getConstructor() {
+            return 0x12;
+        }
+
+        public void readParams(AbstractSerializedData stream, boolean exception) {
+            state = (AuthorizationState) TMStore.deserializeFromSteam(stream, exception);
+        }
+
+        public void serializeToStream(AbstractSerializedData stream) {
+            TMStore.serializeToStream(stream, state);
+        }
+
+    }
 
 }

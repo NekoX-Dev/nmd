@@ -1,4 +1,4 @@
-package io.nekohasekai.nmd.net
+package io.nekohasekai.nmd
 
 import cn.hutool.core.codec.Base64
 import cn.hutool.core.util.ZipUtil
@@ -7,12 +7,12 @@ import io.ktor.http.cio.websocket.*
 import io.ktor.websocket.*
 import io.nekohasekai.ktlib.core.mkLog
 import io.nekohasekai.ktlib.td.core.TdClient
-import io.nekohasekai.nmd.Nmd
 import io.nekohasekai.nmd.database.Sessions
 import io.nekohasekai.nmd.utils.EncUtil
 import io.nekohasekai.tmicro.tmnet.SerializedData
+import io.nekohasekai.tmicro.tmnet.TMApi
 import io.nekohasekai.tmicro.tmnet.TMApi.*
-import io.nekohasekai.tmicro.tmnet.TMClassStore
+import io.nekohasekai.tmicro.tmnet.TMStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -20,11 +20,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.ECPublicKeyParameters
 import org.jetbrains.exposed.sql.select
+import td.TdApi
 
-class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebSocketServerSession) {
+class ConnectionsManager(val sessionKey: ByteArray, time: Int, val session: DefaultWebSocketServerSession) {
 
-    val chaChaSession = EncUtil.ChaChaSession(key, time)
-    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}#${Base64.encodeUrlSafe(key).hashCode()}")
+    val chaChaSession = EncUtil.ChaChaSession(sessionKey, time)
+    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}#${Base64.encodeUrlSafe(sessionKey).hashCode()}")
 
     companion object {
         val connections = HashMap<ByteArray, ConnectionsManager>()
@@ -76,12 +77,23 @@ class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebS
 
     private suspend fun processRequest(data: ByteArray) {
         val request = try {
-            TMClassStore.deserializeFromSteam(SerializedData(data), true)
+            TMStore.deserializeFromSteam(SerializedData(data), true)
         } catch (e: Throwable) {
             log.warn(e, "Deserialize request failed: ")
             return
         }
+        if (request !is TMApi.Function) {
+            close()
+            return
+        }
         processRequest(request)
+    }
+
+    suspend fun close() {
+        session.close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, ":("))
+        if (::client.isInitialized) {
+            client.stop()
+        }
     }
 
 
@@ -93,42 +105,38 @@ class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebS
     private lateinit var account: ByteArray
     private lateinit var tempData: ByteArray
 
-    private suspend fun processRequest(request: Object) {
+    private suspend fun processRequest(request: TMApi.Function) {
 
-        var requestId = -1
-        var function = request
-        if (request is RpcRequest) {
-            requestId = request.requestId
-            function = request.request
-        }
-
-        log.debug("Server received ${function.javaClass.simpleName}")
+        val requestId = request.requestId
+        log.debug("Server received #0x${Integer.toHexString(requestId)} ${request.javaClass.simpleName}")
 
         if (status == Status.DENY) {
             sendError(requestId, 403, "Bad session.")
             return
         }
 
-        when (function) {
+        when (request) {
             is InitConnection -> {
                 if (status != Status.START) {
                     sendError(requestId, 400, "Connection started.")
                     return
                 }
-                if (function.layer > LAYER) {
+                if (request.layer > LAYER) {
                     sendError(requestId, 501, "Max layer of this server is $LAYER.")
                     return
                 }
-                if (function.session.size != 33) {
+                if (request.session.size != 33) {
                     sendError(requestId, 400, "Bad session.")
+                    close()
                     return
                 }
-                account = function.session
+                account = request.session
                 val pubKey = try {
-                    ECPublicKeyParameters(EncUtil.sm2Params.curve.decodePoint(function.session), EncUtil.sm2Params)
+                    ECPublicKeyParameters(EncUtil.sm2Params.curve.decodePoint(request.session), EncUtil.sm2Params)
                 } catch (e: Exception) {
                     log.warn(e, "Encrypt sm2 failed: ")
                     sendError(requestId, 400, "Bad session.")
+                    close()
                     return
                 }
                 tempData = ByteArray(32)
@@ -147,36 +155,20 @@ class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebS
                     sendError(requestId, 400, "Connection verified.")
                     return
                 }
-                if (!tempData.contentEquals(function.data)) {
+                if (!tempData.contentEquals(request.data)) {
                     status = Status.DENY
                     sendError(requestId, 403, "Bad data.")
+                    close()
                     return
                 }
                 status = Status.VERIFIED
                 sendOk(requestId)
+
+                onConnected()
             }
             else -> if (status != Status.VERIFIED) {
                 sendError(requestId, 401, "Unauthorized.")
                 return
-            }
-        }
-
-        when (function) {
-            is GetInfo -> {
-                val account = Nmd.database {
-                    Sessions.select { Sessions.key eq account }
-                        .firstOrNull()
-                }
-                sendResponse(requestId, ClientInfo().apply {
-                    if (account == null) {
-                        accountStatus = STATUS_WAIT_PHONE
-                    } else {
-                        accountStatus = account[Sessions.status]
-                        if (accountStatus == STATUS_AUTHED) {
-                            loginUser = account[Sessions.userId]
-                        }
-                    }
-                })
             }
         }
 
@@ -188,14 +180,18 @@ class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebS
             return
         }
 
-        log.debug("Server send ${result.javaClass.simpleName}")
+        log.debug("Server send #0x${Integer.toHexString(requestId)} ${result.javaClass.simpleName}")
 
-        val response = RpcResponse()
+        val response = Response()
         response.requestId = requestId
         response.response = result
 
+        sendUpdate(response)
+    }
+
+    private suspend fun sendUpdate(update: Object) {
         val data = SerializedData()
-        TMClassStore.serializeToStream(data, response)
+        TMStore.serializeToStream(data, update)
         sendRaw(data.toByteArray())
     }
 
@@ -211,23 +207,87 @@ class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebS
         sendResponse(requestId, error)
     }
 
+    private suspend fun onConnected() {
+        val account = Nmd.database {
+            Sessions.select { Sessions.key eq sessionKey }.firstOrNull()
+        }
+        if (account == null || account[Sessions.status] == 0) {
+            sendUpdate(UpdateAuthorizationState(AuthorizationStateWaitPhoneNumber()))
+        } else {
+            requireClient().start()
+        }
+    }
+
+    private lateinit var client: SessionClient
+    fun requireClient(): SessionClient {
+        if (!::client.isInitialized) {
+            client = SessionClient()
+            client.start()
+        }
+        return client
+    }
+
+    inner class SessionClient : TdClient() {
+
+        init {
+            options databaseDirectory "data/sessions/${Base64.encodeUrlSafe(sessionKey)}"
+            options apiId Nmd.API_ID
+            options apiHash Nmd.API_HASH
+        }
+
+        override suspend fun onAuthorizationState(authorizationState: TdApi.AuthorizationState) {
+            super.onAuthorizationState(authorizationState)
+
+            updateStatus(authorizationState)
+        }
+
+        suspend fun updateStatus(authorizationState: TdApi.AuthorizationState) {
+            fun TdApi.AuthenticationCodeType.trans(): AuthenticationCodeType {
+                return when (this) {
+                    is TdApi.AuthenticationCodeTypeTelegramMessage -> AuthenticationCodeTypeTelegramMessage()
+                    is TdApi.AuthenticationCodeTypeCall -> AuthenticationCodeTypeCall()
+                    is TdApi.AuthenticationCodeTypeSms -> AuthenticationCodeTypeSms()
+                    else -> error("Illegal code type $this")
+                }
+            }
+
+            when (authorizationState) {
+                is TdApi.AuthorizationStateWaitPhoneNumber -> {
+                    sendUpdate(UpdateAuthorizationState(AuthorizationStateWaitPhoneNumber()))
+                }
+                is TdApi.AuthorizationStateWaitCode -> {
+                    val codeInfo = AuthenticationCodeInfo(
+                        authorizationState.codeInfo.phoneNumber,
+                        authorizationState.codeInfo.type.trans(),
+                        authorizationState.codeInfo.nextType?.trans(),
+                        authorizationState.codeInfo.timeout
+                    )
+                    sendUpdate(UpdateAuthorizationState(AuthorizationStateWaitCode(codeInfo)))
+                }
+                is TdApi.AuthorizationStateWaitPassword -> {
+                    val state = AuthorizationStateWaitPassword(
+                        authorizationState.passwordHint,
+                        authorizationState.hasRecoveryEmailAddress,
+                        authorizationState.recoveryEmailAddressPattern
+                    )
+
+                    sendUpdate(UpdateAuthorizationState(state))
+
+                }
+                is TdApi.AuthorizationStateReady -> {
+                    sendUpdate(UpdateAuthorizationState(AuthorizationStateReady()))
+                }
+            }
+        }
+
+    }
+
     suspend fun onClosed() {
-        connections.remove(key)
+        connections.remove(sessionKey)
         if (::client.isInitialized) {
             client.stop()
         }
     }
 
-    lateinit var client: SessionClient
-
-    inner class SessionClient : TdClient() {
-
-        init {
-            options databaseDirectory "data/sessions/${Base64.encodeUrlSafe(key)}"
-            options apiId Nmd.API_ID
-            options apiHash Nmd.API_HASH
-        }
-
-    }
 
 }
