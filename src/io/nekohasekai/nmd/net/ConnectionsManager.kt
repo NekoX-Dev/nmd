@@ -1,10 +1,12 @@
 package io.nekohasekai.nmd.net
 
+import cn.hutool.core.codec.Base64
 import cn.hutool.core.util.ZipUtil
 import io.ktor.features.*
 import io.ktor.http.cio.websocket.*
 import io.ktor.websocket.*
 import io.nekohasekai.ktlib.core.mkLog
+import io.nekohasekai.ktlib.td.core.TdClient
 import io.nekohasekai.nmd.Nmd
 import io.nekohasekai.nmd.database.Sessions
 import io.nekohasekai.nmd.utils.EncUtil
@@ -17,13 +19,12 @@ import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bouncycastle.crypto.params.ECPublicKeyParameters
-import org.bouncycastle.util.encoders.Base64
 import org.jetbrains.exposed.sql.select
 
-class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServerSession) {
+class ConnectionsManager(val key: ByteArray, time: Int, val session: DefaultWebSocketServerSession) {
 
-    val chaChaSession = EncUtil.ChaChaSession(key)
-    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}#${Base64.toBase64String(key).hashCode()}")
+    val chaChaSession = EncUtil.ChaChaSession(key, time)
+    val log = mkLog("Sessions ${session.call.request.origin.remoteHost}#${Base64.encodeUrlSafe(key).hashCode()}")
 
     companion object {
         val connections = HashMap<ByteArray, ConnectionsManager>()
@@ -212,6 +213,21 @@ class ConnectionsManager(val key: ByteArray, val session: DefaultWebSocketServer
 
     suspend fun onClosed() {
         connections.remove(key)
+        if (::client.isInitialized) {
+            client.stop()
+        }
+    }
+
+    lateinit var client: SessionClient
+
+    inner class SessionClient : TdClient() {
+
+        init {
+            options databaseDirectory "data/sessions/${Base64.encodeUrlSafe(key)}"
+            options apiId Nmd.API_ID
+            options apiHash Nmd.API_HASH
+        }
+
     }
 
 }

@@ -94,7 +94,7 @@ object EncUtil {
         }
     }
 
-    class ChaChaSession(private val key: ByteArray, val isServer: Boolean = true) {
+    class ChaChaSession(val key: ByteArray, val time: Int, val isServer: Boolean = true) {
 
         private val nonceIn = MicroRandom(genSeed(false))
         private val nonceOut = MicroRandom(genSeed(true))
@@ -103,9 +103,9 @@ object EncUtil {
          */
         private fun genSeed(output: Boolean): ByteArray {
             return if (output xor isServer) {
-                Arrays.append(key, 0.toByte())
+                Arrays.concatenate(key, BigInteger.valueOf(time.toLong()).toByteArray(), byteArrayOf(0))
             } else {
-                Arrays.append(key, 1.toByte())
+                Arrays.concatenate(key, BigInteger.valueOf(time.toLong()).toByteArray(), byteArrayOf(0))
             }
         }
 

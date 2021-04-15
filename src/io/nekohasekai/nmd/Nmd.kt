@@ -22,13 +22,23 @@ import org.bouncycastle.util.encoders.Base64
 import java.io.File
 import java.time.Duration
 import kotlin.math.abs
+import kotlin.properties.Delegates
 
 object Nmd : TdCli() {
+
+    override var configFile = File("nmd.yml")
+    var API_ID by Delegates.notNull<Int>()
+    lateinit var API_HASH: String
 
     @JvmStatic
     fun main(args: Array<String>) {
         TdLoader.tryLoad(File("cache"), true)
         EngineMain.main(args)
+    }
+
+    override fun onLoad() {
+        API_ID = intConfig("API_ID") ?: error("Missing API_ID")
+        API_HASH = stringConfig("API_HASH") ?: error("Missing API_HASH")
     }
 
     @JvmStatic
@@ -65,8 +75,9 @@ object Nmd : TdCli() {
                 try {
                     val data = SerializedData(EncUtil.publicDecode(Base64.decode(authorization.substringAfter(" "))))
                     val key = data.readByteArray(true)
-                    val connection = ConnectionsManager(key, this)
-                    if (abs((System.currentTimeMillis() / 1000) - data.readInt32(true)) > 10) {
+                    val time = data.readInt32(true)
+                    val connection = ConnectionsManager(key, time, this)
+                    if (abs((System.currentTimeMillis() / 1000) - time) > 30) {
                         error("Invalid timeMs")
                     }
                     connection.loopEvents()
